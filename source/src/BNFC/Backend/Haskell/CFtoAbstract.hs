@@ -40,6 +40,8 @@ cf2Abstract tokenText generic functor name cf = vsep . concat $
     , [ vcat . concat $
         [ [ "{-# LANGUAGE DeriveDataTypeable #-}" | gen ]
         , [ "{-# LANGUAGE DeriveGeneric #-}"      | gen ]
+        , [ "{-# LANGUAGE DeriveAnyClass #-}"       ]
+        , [ "{-# LANGUAGE DeriveFunctor #-}"       ]
         , [ "{-# LANGUAGE GeneralizedNewtypeDeriving #-}" | hasIdentLike  ] -- for IsString
         ]
       ]
@@ -59,8 +61,15 @@ cf2Abstract tokenText generic functor name cf = vsep . concat $
     , (`map` specialCats cf) $ \ c ->
         let hasPos = isPositionCat cf c
         in  prSpecialData tokenText hasPos (derivingClassesTokenType hasPos) c
+    , (`map` ["MyString", "MyInteger", "MyDouble", "MyChar"]) $ \c -> createMy c (derivingClasses ++ ["C.Functor"])
+    , (map cmy [ "Ident"
+               , "MyString"
+               , "MyInteger"
+               , "MyDouble"
+               , "MyChar"])
     , concatMap (prData functorName derivingClasses) datas
     , definedRules functor cf
+    , [ vcat ["class MC f where", "  mct :: f a -> a"]]
     , [ "" ] -- ensure final newline
     ]
   where
@@ -68,12 +77,12 @@ cf2Abstract tokenText generic functor name cf = vsep . concat $
     datas = cf2data cf
     gen   = generic && not (null datas)
     derivingClasses = map ("C." ++) $ concat
-      [ [ "Eq", "Ord", "Show", "Read" ]
+      [ [ "Eq", "Ord", "Show", "Read"]
       , when generic [ "Data", "Typeable", "Generic" ]
       ]
     derivingClassesTokenType hasPos = concat
       [ derivingClasses
-      , [ "Data.String.IsString" | not hasPos ]
+      , [ "Data.String.IsString" , "C.Functor" ]
       ]
     typeImports = List.intercalate ", " $ concat
       [ [ "Char", "Double" ]
@@ -133,6 +142,7 @@ prData functorName derivingClasses (cat,rules) = concat
         $+$ nest 2 (deriving_ derivingClasses)
       ]
     , [ genFunctorInstance functorName (cat, rules) | functor ]
+    , [ genMCInstance (cat, rules) | functor ]
     ]
   where
     functor            = not $ null functorName
@@ -141,7 +151,7 @@ prData functorName derivingClasses (cat,rules) = concat
     prArg              = catToType id $ if functor then "a" else empty
     constructors []    = empty
     constructors (h:t) = sep $ ["=" <+> prRule h] ++ map (("|" <+>) . prRule) t
-
+    
 -- | Generate a functor instance declaration:
 --
 -- >>> genFunctorInstance "Functor" (Cat "C", [("C1", [Cat "C", Cat "C"]), ("CIdent", [TokenCat "Ident"])])
@@ -170,12 +180,39 @@ genFunctorInstance functorName (cat, cons) =
       where vars = catvars args
     -- We recursively call fmap on non-terminals only if they are not token categories.
     recurse var = \case
+      TokenCat "Ident"   -> parens ("fmap f" <+> var)
+      TokenCat "String"   -> parens ("fmap f" <+> var)
+      TokenCat "Integer"   -> parens ("fmap f" <+> var)
+      TokenCat "Double"   -> parens ("fmap f" <+> var)
+      TokenCat "Char"   -> parens ("fmap f" <+> var)
+      ListCat (TokenCat "Ident") -> parens ("map (fmap f)" <+> var)
+      ListCat (TokenCat "String") -> parens ("map (fmap f)" <+> var)
+      ListCat (TokenCat "Integer") -> parens ("map (fmap f)" <+> var)
+      ListCat (TokenCat "Double") -> parens ("map (fmap f)" <+> var)
+      ListCat (TokenCat "Char") -> parens ("map (fmap f)" <+> var)
       TokenCat{}         -> var
       ListCat TokenCat{} -> var
       ListCat{}          -> parens ("map (fmap f)" <+> var)
       _                  -> parens ("fmap f"       <+> var)
 
 
+genMCInstance ::  Data -> Doc
+genMCInstance (cat, cons) =
+    "instance" <+> text "MC" <+> text (show cat) <+> "where"
+    $+$ nest 4 ("mct f = case f of" $+$ nest 4 (vcat (map mkCase cons)))
+  where
+    mkCase (f, args) = hsep ([ text f, "a" ] ++ vars ++  [ "->", "a" ] )
+      where vars = catvars args
+
+createMy :: String -> [String] -> Doc 
+createMy v classes = 
+    "data" <+> text v <+> "a" <+> "=" <+> text v <+> "a" <+> text ( drop 2 v)
+    $+$ nest 4 (deriving_ classes)
+
+cmy :: String -> Doc 
+cmy s = 
+    "instance MC" <+> text s <+> "where"
+    $+$ nest 4 ("mct (" <+> text s <+> "a s ) = a")
 -- | Generate a newtype declaration for Ident types
 --
 -- >>> prSpecialData StringToken False ["Show","Data.String.IsString"] catIdent
@@ -205,7 +242,7 @@ prSpecialData
   -> TokenCat   -- ^ Token category name.
   -> Doc
 prSpecialData tokenText position classes cat = vcat
-    [ hsep [ "newtype", text cat, "=", text cat, contentSpec ]
+    [ hsep [ "data", text cat, "a =", text cat, "a" , contentSpec ]
     , nest 2 $ deriving_ classes
     ]
   where

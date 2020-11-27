@@ -158,7 +158,8 @@ catToType qualify param cat = parensIf isApp $ loop cat
       CoercCat c _  -> qualify (text c) <+> param
       TokenCat c
         | c `elem` baseTokenCatNames
-                    -> text c
+                    -> (text $ "(My" ++ c ++ " a)")
+        | c == "Ident" -> parens (text "Ident " <+> param)
         | otherwise -> qualify (text c)
 
 -- | Convert a base type to Haskell syntax.

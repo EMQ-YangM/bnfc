@@ -43,10 +43,9 @@ cf2Printer tokenText functor useGadt name absMod cf = unlines $ concat $
   [ prologue tokenText useGadt name absMod
   , integerRule absMod cf
   , doubleRule absMod cf
-  , if hasIdent cf then identRule absMod tokenText cf else []
-  ] ++ [ ownPrintRule absMod tokenText cf own | (own,_) <- tokenPragmas cf ] ++
+  ] ++ [ ownPrintRule absMod (tokenText) cf own | (own,_) <- tokenPragmas cf ] ++
   [ rules absMod functor cf
-  ]
+  ] ++ [(map (render . myins) ["Ident", "MyString", "MyInteger", "MyDouble", "MyChar"])]
 
 
 prologue :: TokenText -> Bool -> String -> AbsMod -> [String]
@@ -66,6 +65,7 @@ prologue tokenText useGadt name absMod = concat
     , "module " ++ name +++ "where"
     , ""
     , "import qualified " ++ absMod
+    , "import " ++ absMod
     , "import Data.Char"
     ]
   , tokenTextImport tokenText
@@ -207,7 +207,7 @@ ownPrintRule absMod tokenText cf own = concat
 rules :: AbsMod -> Bool -> CF -> [String]
 rules absMod functor cf = do
     (cat, xs :: [(Fun, [Cat])]) <- cf2dataLists cf
-    [ render (case_fun absMod functor cat (map (toArgs cat) xs)) ] ++ ifList cf cat ++ [ "" ]
+    [ render (myCaseFun absMod functor ( cat) (map (toArgs cat) xs)) ] ++ ifList cf cat ++ [ "" ]
   where
     toArgs :: Cat -> (Fun, [Cat]) -> Rule
     toArgs cat (cons, _) =
@@ -246,6 +246,19 @@ case_fun absMod functor cat xs =
       ListCat c    -> "[" <> type' c <> "]"
       c@TokenCat{} -> text (qualifiedCat absMod c)
       c            -> text (qualifiedCat absMod c) <+> "a"
+
+myCaseFun :: AbsMod -> Bool -> Cat -> [Rule] -> Doc 
+myCaseFun _ _ (ListCat (TokenCat "Ident")) _ = ""
+myCaseFun a b c d = case_fun a b c d
+
+
+myins :: String -> Doc 
+myins s = 
+  vcat
+    [ "instance Print (" <+> text s <+> "a) where"
+    , nest 2 
+        ("prt _ (" <+> text s <+> "a s) = doc (showString $ show s)")
+    ]
 
 -- | When writing the Print instance for a category (in case_fun), we have
 -- a different case for each constructor for this category.

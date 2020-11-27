@@ -59,6 +59,7 @@ header modName absName lexName tokenText = unlines $ concat
     , "{"
     , "{-# OPTIONS_GHC -fno-warn-incomplete-patterns -fno-warn-overlapping-patterns #-}"
     , "module " ++ modName ++ " where"
+    , "import " ++ absName ++  " (mct, Ident(..), MyString(..), MyInteger(..), MyDouble(..), MyChar(..))"
     , "import qualified " ++ absName
     , "import " ++ lexName
     ]
@@ -142,13 +143,30 @@ constructRule absName functor (Rule fun0 _cat rhs Parsable) = (pattern, action)
     (pattern, metavars) = generatePatterns rhs
     action | isCoercion fun                 = unwords metavars
            | isNilCons fun                  = unwords (qualify fun : metavars)
-           | functor                        = unwords (qualify fun : "()" : metavars)
+           | functor                        = unwords (qualify fun :  (getRight rhs)
+                                                                   : metavars)
            | otherwise                      = unwords (qualify fun : metavars)
     qualify f
       | isConsFun f || isNilCons f = f
       | isDefinedRule f = absName ++ "." ++ mkDefName f
       | otherwise       = absName ++ "." ++ f
 constructRule _ _ (Rule _ _ _ Internal) = undefined -- impossible
+
+-- ("(toPos $" ++ (show $ getRight rhs) ++")")
+getRight :: SentForm -> String
+getRight [] = "(Pn 0 0 0)"
+getRight (Right x:_) = "(toPos $1)"
+getRight (Left (Cat _) : _) = "(mct $1)"
+getRight (Left (TokenCat _) : _) = "(mct $1)"
+getRight (Left (ListCat _) : _) = "(mct $ head $1)"
+getRight (Left x:_) = "(mct $1)"
+
+--case filter fl ns of 
+--              [] -> "(mtc $" ++ (show $ fst x) ++ ")"
+--              x:_ -> "(toPos $" ++ (show $ fst x) ++ ")"
+  --where ns = zip [1..] sf
+  --      fl (_, Right _) = True
+  --      fl (_, Left _) = False
 
 
 -- | Generate patterns and a set of metavariables (de Bruijn indices) indicating
@@ -206,7 +224,7 @@ prRules absM functor = vsep . map prOne
       where
         nt' = text (identCat nt)
         pr pre (p,a) = hsep [pre, text p, "{", text a , "}"]
-    type' = catToType qualify $ if functor then "()" else empty
+    type' = catToType qualify $ if functor then "Posn" else empty
     qualify
       | null absM = id
       | otherwise = ((text absM <> ".") <>)
@@ -216,6 +234,17 @@ prRules absM functor = vsep . map prOne
 footer :: String
 footer = unlines $
     [ "{"
+    , ""
+    , "toPos :: " ++ tokenName ++ " -> Posn"
+    , "toPos (PT p _) = p"
+    , "toPos (Err p) = p"
+    , "getValue :: Token -> String"
+    , "getValue (PT _ (TL s)) = s"
+    , "getValue (PT _ (TI s)) = s"
+    , "getValue (PT _ (TV s)) = s"
+    , "getValue (PT _ (TD s)) = s"
+    , "getValue (PT _ (TC s)) = s"
+    , "getValue (PT _ (TS s _)) =s "
     , ""
     , "happyError :: [" ++ tokenName ++ "] -> Either String a"
     , "happyError ts = Left $"
@@ -237,11 +266,11 @@ footer = unlines $
 -- | GF literals.
 specialToks :: CF -> [String]
 specialToks cf = (`map` literals cf) $ \case
-  "Ident"   -> "L_Ident  { PT _ (TV $$) }"
-  "String"  -> "L_quoted { PT _ (TL $$) }"
-  "Integer" -> "L_integ  { PT _ (TI $$) }"
-  "Double"  -> "L_doubl  { PT _ (TD $$) }"
-  "Char"    -> "L_charac { PT _ (TC $$) }"
+  "Ident"   -> "L_Ident  { PT _ (TV _) }"
+  "String"  -> "L_quoted { PT _ (TL _) }"
+  "Integer" -> "L_integ  { PT _ (TI _) }"
+  "Double"  -> "L_doubl  { PT _ (TD _) }"
+  "Char"    -> "L_charac { PT _ (TC _) }"
   own       -> "L_" ++ own ++ " { PT _ (T_" ++ own ++ " " ++ posn ++ ") }"
     where posn = if isPositionCat cf own then "_" else "$$"
 
@@ -249,14 +278,16 @@ specialRules :: ModuleName -> TokenText -> CF -> String
 specialRules absName tokenText cf = unlines . intersperse "" . (`map` literals cf) $ \case
     -- "Ident"   -> "Ident   :: { Ident }"
     --         ++++ "Ident    : L_ident  { Ident $1 }"
-    "String"  -> "String  :: { String }"
-            ++++ "String   : L_quoted { " ++ stringUnpack "$1" ++ " }"
-    "Integer" -> "Integer :: { Integer }"
-            ++++ "Integer  : L_integ  { (read (" ++ stringUnpack "$1" ++ ")) :: Integer }"
-    "Double"  -> "Double  :: { Double }"
-            ++++ "Double   : L_doubl  { (read (" ++ stringUnpack "$1" ++ ")) :: Double }"
-    "Char"    -> "Char    :: { Char }"
-            ++++ "Char     : L_charac { (read (" ++ stringUnpack "$1" ++ ")) :: Char }"
+    "String"  -> "String  :: { MyString Posn }"
+            ++++ "String   : L_quoted { MyString" ++ " (toPos $1)" ++ " (getValue $1)}"
+    "Integer" -> "Integer :: { MyInteger Posn }"
+            ++++ "Integer  : L_integ  { MyInteger (" ++ "toPos $1" ++ ") (read (getValue $1) :: Integer) }"
+    "Double"  -> "Double  :: { MyDouble Posn }"
+            ++++ "Double   : L_doubl  { MyDouble (" ++  "toPos $1" ++ ") (read (getValue $1) :: Double) }"
+    "Char"    -> "Char    :: { MyChar Posn }"
+            ++++ "Char     : L_charac { MyChar (" ++  "toPos $1" ++ ") (read (getValue $1) :: Char ) }"
+    "Ident"   -> "Ident" ++ " :: { " ++ qualify "Ident" ++ " Posn}"
+            ++++ "Ident" ++ "  : L_" ++ "Ident" ++ " { " ++ qualify "Ident" ++ " (toPos $1)" ++ " (getValue $1) }"
     own       -> own ++ " :: { " ++ qualify own ++ "}"
             ++++ own ++ "  : L_" ++ own ++ " { " ++ qualify own ++ posn ++ " }"
       where posn = if isPositionCat cf own then " (mkPosToken $1)" else " $1"

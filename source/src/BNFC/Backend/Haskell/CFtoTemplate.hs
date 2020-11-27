@@ -28,7 +28,7 @@ cf2Template skelName absName functor cf = unlines
     , ""
     , "failure :: Show a => a -> Result"
     , "failure x = Left $ \"Undefined case: \" ++ show x\n"
-    , unlines $ map (render . \(s,xs) -> case_fun absName functor s xs) $ specialData cf ++ cf2data cf
+    , unlines $ map (render . \(s,xs) -> myCaseFun absName functor s xs) $ specialData cf ++ cf2data cf
     ]
 
 -- |
@@ -70,3 +70,13 @@ case_fun absName functor' cat xs = vcat
     qualify
       | null absName = id
       | otherwise    = (text absName <> "." <>)
+
+myCaseFun :: ModuleName -> Bool -> Cat -> [(Fun, [Cat])] -> Doc 
+myCaseFun absName _ cat@(TokenCat "Ident") _ = 
+    let  fname = "trans" <> cat'
+         cat' =  text (show cat)    
+         qualify :: Doc -> Doc
+         qualify | null absName = id
+                 | otherwise    = (text absName <> "." <>)
+    in vcat [ fname <+> ":: Show a =>" <+> qualify cat' <+> "a -> Result", fname <+> "x = failure x"] 
+myCaseFun a b c d = case_fun a b c d
